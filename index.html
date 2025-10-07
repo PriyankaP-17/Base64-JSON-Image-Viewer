@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Base64 JSON Image Viewer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Roboto', sans-serif;
+            background: #f0f2f8;
+            margin: 0;
+            padding: 20px;
+            overflow-x: hidden;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        #controls {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        input[type="file"] {
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid #ccc;
+            background: #fff;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        input[type="file"]:hover {
+            border-color: #4CAF50;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        button {
+            padding: 10px 15px;
+            border: none;
+            border-radius: 8px;
+            background: #4CAF50;
+            color: white;
+            cursor: pointer;
+            font-weight: 500;
+            transition: transform 0.3s, background 0.3s, box-shadow 0.3s;
+        }
+
+        button:hover:not(:disabled) {
+            background: #45a049;
+            transform: scale(1.05);
+            box-shadow: 0 6px 15px rgba(0,0,0,0.2);
+        }
+
+        button:disabled {
+            background: #aaa;
+            cursor: not-allowed;
+        }
+
+        #status {
+            text-align: center;
+            margin-bottom: 20px;
+            font-weight: 500;
+            overflow: hidden;
+            white-space: nowrap;
+        }
+
+        #status span {
+            display: inline-block;
+            padding-left: 100%;
+            animation: marquee 10s linear infinite;
+            color: #555;
+        }
+
+        @keyframes marquee {
+            0% { transform: translateX(0%); }
+            100% { transform: translateX(-100%); }
+        }
+
+        .gallery {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 20px;
+        }
+
+        .image-card {
+            background: #fff;
+            border-radius: 12px;
+            padding: 10px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            text-align: center;
+            transition: transform 0.3s, box-shadow 0.3s, opacity 0.5s;
+            opacity: 0;
+            animation: fadeIn 0.5s forwards;
+        }
+
+        .image-card:hover {
+            transform: translateY(-5px) scale(1.05);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.2);
+        }
+
+        @keyframes fadeIn {
+            to { opacity: 1; }
+        }
+
+        .image-card img {
+            max-width: 100%;
+            max-height: 150px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            object-fit: contain;
+            transition: transform 0.3s;
+        }
+
+        .image-card img:hover {
+            transform: scale(1.1);
+        }
+
+        .caption {
+            font-weight: 500;
+            margin-bottom: 5px;
+            color: #555;
+            word-break: break-word;
+        }
+
+    </style>
+</head>
+<body>
+    <h1>✨ Base64 JSON Image Viewer ✨</h1>
+    <div id="controls">
+        <input type="file" id="jsonFile" accept=".json">
+        <button id="downloadAllBtn" disabled>Download All as ZIP</button>
+    </div>
+    <div id="status"><span></span></div>
+    <div class="gallery" id="gallery"></div>
+
+    <script>
+        const jsonFileInput = document.getElementById('jsonFile');
+        const gallery = document.getElementById('gallery');
+        const status = document.getElementById('status').querySelector('span');
+        const downloadAllBtn = document.getElementById('downloadAllBtn');
+
+        let validImages = [];
+
+        function parseJSONContent(text) {
+            const start = text.indexOf('{');
+            const end = text.lastIndexOf('}');
+            if (start === -1 || end === -1) return null;
+            try {
+                return JSON.parse(text.slice(start, end + 1));
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function createImageCard(base64, filename) {
+            const card = document.createElement('div');
+            card.className = 'image-card';
+
+            const img = document.createElement('img');
+            img.src = `data:image/png;base64,${base64}`;
+            img.alt = filename;
+
+            const caption = document.createElement('div');
+            caption.className = 'caption';
+            caption.textContent = filename;
+
+            const downloadBtn = document.createElement('button');
+            downloadBtn.textContent = 'Download';
+            downloadBtn.onclick = () => {
+                const link = document.createElement('a');
+                link.href = img.src;
+                link.download = filename;
+                link.click();
+            };
+
+            card.appendChild(img);
+            card.appendChild(caption);
+            card.appendChild(downloadBtn);
+
+            return card;
+        }
+
+        jsonFileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                gallery.innerHTML = '';
+                status.textContent = '';
+                validImages = [];
+
+                const text = event.target.result;
+                const data = parseJSONContent(text);
+                if (!data) {
+                    status.textContent = '❌ Could not parse JSON.';
+                    downloadAllBtn.disabled = true;
+                    return;
+                }
+
+                let count = 0;
+                for (const key in data) {
+                    const value = data[key];
+                    if (!value || typeof value !== 'string') continue;
+
+                    try {
+                        atob(value);
+                        const card = createImageCard(value, key.replace('/', '_'));
+                        gallery.appendChild(card);
+                        validImages.push({filename: key.replace('/', '_'), base64: value});
+                        count++;
+                    } catch (err) {
+                        continue;
+                    }
+                }
+
+                status.textContent = `✅ ${count} image(s) loaded.`;
+                downloadAllBtn.disabled = validImages.length === 0;
+            };
+            reader.readAsText(file);
+        });
+
+        downloadAllBtn.addEventListener('click', async () => {
+            if (validImages.length === 0) return;
+            const zip = new JSZip();
+            validImages.forEach(img => {
+                zip.file(img.filename, img.base64, {base64: true});
+            });
+            const content = await zip.generateAsync({type:"blob"});
+            saveAs(content, "images.zip");
+        });
+    </script>
+</body>
+</html>
